@@ -1,0 +1,199 @@
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { getCurrencies, getRate } from './api'
+import { metaFor } from './flags'
+
+const POPULAR = ['USD', 'EUR', 'GBP', 'DKK', 'JPY', 'CHF']
+
+function formatDate(d) {
+  if (!d) return ''
+  const date = new Date(d + 'T16:00:00')
+  return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+}
+
+export default function App() {
+  const [currencies, setCurrencies] = useState({})
+  const [amount, setAmount] = useState('100')
+  const [from, setFrom] = useState('USD')
+  const [to, setTo] = useState('EUR')
+  const [rate, setRate] = useState(null)
+  const [date, setDate] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+  const [spread, setSpread] = useState(0) // bank/card markup %, transparency feature
+  const [swapped, setSwapped] = useState(false)
+
+  // Load the currency list once.
+  useEffect(() => {
+    getCurrencies()
+      .then(setCurrencies)
+      .catch(() => setError('Could not load currencies. Check your connection.'))
+  }, [])
+
+  // Fetch the rate whenever the pair changes.
+  useEffect(() => {
+    let active = true
+    setLoading(true)
+    setError(null)
+    getRate(from, to)
+      .then(({ rate, date }) => {
+        if (!active) return
+        setRate(rate)
+        setDate(date)
+        setLoading(false)
+      })
+      .catch(() => {
+        if (!active) return
+        setError('Rate unavailable right now.')
+        setLoading(false)
+      })
+    return () => { active = false }
+  }, [from, to])
+
+  const numeric = parseFloat(amount) || 0
+  const effectiveRate = rate != null ? rate * (1 - spread / 100) : null
+  const midResult = rate != null ? numeric * rate : null
+  const result = effectiveRate != null ? numeric * effectiveRate : null
+  const lost = midResult != null && result != null ? midResult - result : 0
+
+  const fmt = (n, code) =>
+    new Intl.NumberFormat('en-US', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: code === 'JPY' || code === 'KRW' ? 0 : 2,
+    }).format(n)
+
+  function swap() {
+    setSwapped((s) => !s)
+    setFrom(to)
+    setTo(from)
+  }
+
+  const codes = useMemo(() => Object.keys(currencies).sort(), [currencies])
+
+  return (
+    <div className="app">
+      <div className="grain" aria-hidden />
+      <div className="glow" aria-hidden />
+
+      <header className="masthead">
+        <div className="mark">💱</div>
+        <div>
+          <h1>VAULT</h1>
+          <p className="tag">Live foreign exchange · ECB reference rates</p>
+        </div>
+      </header>
+
+      <main className="card">
+        {/* Amount */}
+        <label className="field-label">You send</label>
+        <div className="amount-row">
+          <input
+            className="amount-input"
+            inputMode="decimal"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ''))}
+            aria-label="Amount to convert"
+          />
+          <CurrencySelect value={from} codes={codes} currencies={currencies} onChange={setFrom} />
+        </div>
+
+        {/* Swap */}
+        <div className="swap-line">
+          <span className="rule" />
+          <button className={`swap-btn ${swapped ? 'spun' : ''}`} onClick={swap} aria-label="Swap currencies">
+            ↑↓
+          </button>
+          <span className="rule" />
+        </div>
+
+        {/* Result */}
+        <label className="field-label">They receive</label>
+        <div className="result-row">
+          <div className={`result-figure ${loading ? 'is-loading' : ''}`}>
+            <span className="result-symbol">{metaFor(to).symbol}</span>
+            <span className="result-number">
+              {error ? '—' : result != null ? fmt(result, to) : '—'}
+            </span>
+          </div>
+          <CurrencySelect value={to} codes={codes} currencies={currencies} onChange={setTo} />
+        </div>
+
+        {/* Rate line */}
+        <div className="rate-line">
+          {error ? (
+            <span className="err">{error}</span>
+          ) : rate != null ? (
+            <>
+              <span className="dot" />
+              <span className="mono">
+                1 {from} = {fmt(rate, to)} {to}
+              </span>
+              {date && <span className="updated">updated {formatDate(date)}</span>}
+            </>
+          ) : (
+            <span className="mono dim">fetching rate…</span>
+          )}
+        </div>
+
+        {/* Transparency: markup spread slider */}
+        <div className="spread">
+          <div className="spread-head">
+            <span className="field-label">Bank / card markup</span>
+            <span className="mono spread-val">{spread.toFixed(1)}%</span>
+          </div>
+          <input
+            type="range"
+            min="0"
+            max="5"
+            step="0.1"
+            value={spread}
+            onChange={(e) => setSpread(parseFloat(e.target.value))}
+            className="slider"
+          />
+          <p className="spread-note">
+            {spread === 0
+              ? 'Showing the mid-market rate — what banks see, before their cut.'
+              : `At ${spread.toFixed(1)}% you'd lose ≈ ${metaFor(to).symbol}${fmt(lost, to)} vs. the mid-market rate.`}
+          </p>
+        </div>
+      </main>
+
+      {/* Quick pairs */}
+      <div className="quick">
+        {POPULAR.filter((c) => c !== from).slice(0, 5).map((c) => (
+          <button key={c} className="chip" onClick={() => setTo(c)}>
+            <span>{metaFor(c).flag}</span> {c}
+          </button>
+        ))}
+      </div>
+
+      <footer className="foot">
+        <span>Rates: <a href="https://frankfurter.dev" target="_blank" rel="noreferrer">Frankfurter</a> · ECB</span>
+        <span className="soon">Google Sign-In &amp; Sheets sync — coming next</span>
+      </footer>
+    </div>
+  )
+}
+
+function CurrencySelect({ value, codes, currencies, onChange }) {
+  const ref = useRef(null)
+  const meta = metaFor(value)
+  return (
+    <div className="select-wrap">
+      <span className="select-flag">{meta.flag}</span>
+      <select
+        ref={ref}
+        className="select"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        title={currencies[value] || value}
+      >
+        {codes.map((c) => (
+          <option key={c} value={c}>
+            {c} — {currencies[c]}
+          </option>
+        ))}
+      </select>
+      <span className="select-caret">▾</span>
+    </div>
+  )
+}
