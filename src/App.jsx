@@ -3,6 +3,7 @@ import { getCurrencies, getRate } from './api'
 import { metaFor } from './flags'
 import { useGoogleAuth } from './useGoogleAuth'
 import { useFavorites } from './useFavorites'
+import { useSheets } from './useSheets'
 
 const POPULAR = ['USD', 'EUR', 'GBP', 'DKK', 'JPY', 'CHF']
 
@@ -26,7 +27,26 @@ export default function App() {
 
   const { user, signOut, buttonRef, configured } = useGoogleAuth()
   const { favs, toggle, isFav } = useFavorites(user)
+  const { submit, saving, error: saveError, savedUrl } = useSheets(user)
+  const [justSaved, setJustSaved] = useState(false)
   const pair = `${from}/${to}`
+
+  async function handleSubmit() {
+    if (rate == null || error) return
+    const ok = await submit({
+      amount: numeric,
+      from,
+      to,
+      rate,
+      result: result != null ? Number(result.toFixed(4)) : null,
+      spread,
+      effectiveRate: effectiveRate != null ? Number(effectiveRate.toFixed(6)) : null,
+    })
+    if (ok) {
+      setJustSaved(true)
+      setTimeout(() => setJustSaved(false), 2500)
+    }
+  }
 
   // Load the currency list once.
   useEffect(() => {
@@ -188,6 +208,30 @@ export default function App() {
               : `At ${spread.toFixed(1)}% you'd lose ≈ ${metaFor(to).symbol}${fmt(lost, to)} vs. the mid-market rate.`}
           </p>
         </div>
+
+        {/* Submit → append to Google Sheet */}
+        {configured && (
+          <div className="submit-block">
+            <button
+              className={`submit-btn ${justSaved ? 'ok' : ''}`}
+              onClick={handleSubmit}
+              disabled={saving || rate == null || !!error}
+            >
+              {saving ? 'Saving…' : justSaved ? '✓ Saved to Sheet' : 'Save this conversion'}
+            </button>
+            <div className="submit-meta">
+              {saveError ? (
+                <span className="err">{saveError}</span>
+              ) : savedUrl ? (
+                <a href={savedUrl} target="_blank" rel="noreferrer" className="sheet-link">
+                  View your sheet ↗
+                </a>
+              ) : (
+                <span className="dim-note">Logs each conversion to a Google Sheet in your Drive</span>
+              )}
+            </div>
+          </div>
+        )}
       </main>
 
       {/* Favorites (when saved) or quick popular targets */}
@@ -217,7 +261,7 @@ export default function App() {
 
       <footer className="foot">
         <span>Rates: <a href="https://frankfurter.dev" target="_blank" rel="noreferrer">Frankfurter</a> · ECB</span>
-        <span className="soon">Google Sheets sync — coming next</span>
+        <span className="soon">Sign-in + Sheets sync · live</span>
       </footer>
     </div>
   )

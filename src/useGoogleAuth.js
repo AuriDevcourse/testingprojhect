@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { loadGis } from './gis'
 
 const CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID
 const STORAGE_KEY = 'vault:user'
@@ -11,25 +12,6 @@ function decodeJwt(token) {
   } catch {
     return null
   }
-}
-
-function loadGis() {
-  return new Promise((resolve, reject) => {
-    if (window.google?.accounts?.id) return resolve()
-    const existing = document.getElementById('gis-script')
-    if (existing) {
-      existing.addEventListener('load', () => resolve())
-      return
-    }
-    const s = document.createElement('script')
-    s.src = 'https://accounts.google.com/gsi/client'
-    s.id = 'gis-script'
-    s.async = true
-    s.defer = true
-    s.onload = () => resolve()
-    s.onerror = () => reject(new Error('Failed to load Google script'))
-    document.head.appendChild(s)
-  })
 }
 
 export function useGoogleAuth() {
@@ -58,9 +40,10 @@ export function useGoogleAuth() {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(u)) } catch {}
   }, [])
 
-  // Initialise GIS and render the button when signed out.
+  // Always load GIS (so the Sheets token flow works on persisted sessions);
+  // render the sign-in button only when signed out.
   useEffect(() => {
-    if (!configured || user) return
+    if (!configured) return
     let cancelled = false
     loadGis()
       .then(() => {
@@ -70,7 +53,7 @@ export function useGoogleAuth() {
           callback: handleCredential,
         })
         setReady(true)
-        if (buttonRef.current) {
+        if (!user && buttonRef.current) {
           window.google.accounts.id.renderButton(buttonRef.current, {
             theme: 'filled_black',
             size: 'medium',
