@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { getCurrencies, getRate } from './api'
 import { metaFor } from './flags'
+import { useGoogleAuth } from './useGoogleAuth'
+import { useFavorites } from './useFavorites'
 
 const POPULAR = ['USD', 'EUR', 'GBP', 'DKK', 'JPY', 'CHF']
 
@@ -21,6 +23,10 @@ export default function App() {
   const [error, setError] = useState(null)
   const [spread, setSpread] = useState(0) // bank/card markup %, transparency feature
   const [swapped, setSwapped] = useState(false)
+
+  const { user, signOut, buttonRef, configured } = useGoogleAuth()
+  const { favs, toggle, isFav } = useFavorites(user)
+  const pair = `${from}/${to}`
 
   // Load the currency list once.
   useEffect(() => {
@@ -76,9 +82,26 @@ export default function App() {
 
       <header className="masthead">
         <div className="mark">💱</div>
-        <div>
+        <div className="brand">
           <h1>VAULT</h1>
           <p className="tag">Live foreign exchange · ECB reference rates</p>
+        </div>
+        <div className="auth">
+          {user ? (
+            <div className="user">
+              {user.picture && <img src={user.picture} alt="" referrerPolicy="no-referrer" />}
+              <div className="user-text">
+                <span className="user-name">{user.name?.split(' ')[0]}</span>
+                <button className="signout" onClick={signOut}>Sign out</button>
+              </div>
+            </div>
+          ) : configured ? (
+            <div ref={buttonRef} className="gbtn" />
+          ) : (
+            <span className="auth-hint" title="Add VITE_GOOGLE_CLIENT_ID to .env — see docs/google-setup.md">
+              Sign-in: add client ID
+            </span>
+          )}
         </div>
       </header>
 
@@ -132,6 +155,16 @@ export default function App() {
           ) : (
             <span className="mono dim">fetching rate…</span>
           )}
+          {rate != null && !error && (
+            <button
+              className={`star ${isFav(pair) ? 'on' : ''}`}
+              onClick={() => toggle(pair)}
+              aria-label={isFav(pair) ? 'Remove favorite' : 'Save favorite'}
+              title={user ? 'Save to your account' : 'Save (sign in to sync)'}
+            >
+              {isFav(pair) ? '★' : '☆'}
+            </button>
+          )}
         </div>
 
         {/* Transparency: markup spread slider */}
@@ -157,18 +190,34 @@ export default function App() {
         </div>
       </main>
 
-      {/* Quick pairs */}
-      <div className="quick">
-        {POPULAR.filter((c) => c !== from).slice(0, 5).map((c) => (
-          <button key={c} className="chip" onClick={() => setTo(c)}>
-            <span>{metaFor(c).flag}</span> {c}
-          </button>
-        ))}
-      </div>
+      {/* Favorites (when saved) or quick popular targets */}
+      {favs.length > 0 ? (
+        <div className="quick">
+          <span className="quick-label">{user ? 'Your pairs' : 'Saved'}</span>
+          {favs.map((p) => {
+            const [f, t] = p.split('/')
+            return (
+              <button key={p} className="chip fav" onClick={() => { setFrom(f); setTo(t) }}>
+                <span>{metaFor(f).flag}</span>{f}
+                <span className="arrow">→</span>
+                <span>{metaFor(t).flag}</span>{t}
+              </button>
+            )
+          })}
+        </div>
+      ) : (
+        <div className="quick">
+          {POPULAR.filter((c) => c !== from).slice(0, 5).map((c) => (
+            <button key={c} className="chip" onClick={() => setTo(c)}>
+              <span>{metaFor(c).flag}</span> {c}
+            </button>
+          ))}
+        </div>
+      )}
 
       <footer className="foot">
         <span>Rates: <a href="https://frankfurter.dev" target="_blank" rel="noreferrer">Frankfurter</a> · ECB</span>
-        <span className="soon">Google Sign-In &amp; Sheets sync — coming next</span>
+        <span className="soon">Google Sheets sync — coming next</span>
       </footer>
     </div>
   )
